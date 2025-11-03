@@ -83,7 +83,11 @@ const ServerDetails = ({
   useEffect(() => {
     if (!currentServer || !userId) return;
 
-    socket.current = io(host);
+    // socket.current = io(host);
+    socket.current = io(host, {
+      withCredentials: true,
+      transports: ["websocket"], // optional but helps avoid fallback issues
+    });
 
     socket.current.emit("userOnline", { serverId: currentServer, userId });
 
@@ -348,7 +352,6 @@ const ServerDetails = ({
             <div className="flex items-center">
               <GoDotFill className="mr-1 text-green-500" />
               <span>{onlineUsers}</span>
-              <pre>{onlineUsers}</pre>
               <p>Online</p>
             </div>
 

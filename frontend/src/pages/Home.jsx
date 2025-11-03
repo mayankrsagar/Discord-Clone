@@ -104,7 +104,10 @@ const Home = () => {
     // do not connect until we have a user id
     if (!user?._id) return;
 
-    socket.current = io(host);
+    socket.current = io(host, {
+      withCredentials: true,
+      transports: ["websocket"], // optional but helps avoid fallback issues
+    });
 
     // listen for invites pushed by server. backend should emit 'inviteReceived' with invite object
     socket.current.on("inviteReceived", (invite) => {

@@ -1,11 +1,9 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 // MongoDB connection
 const connectToDb = async () => {
   try {
-    const mongo = await mongoose.connect(
-      "mongodb://localhost:27017/discordClone"
-    );
+    const mongo = await mongoose.connect(process.env.MONGO_URI);
     console.log("MongoDB connected successfully:", mongo.connection.name);
   } catch (error) {
     console.error("MongoDB connection failed:", error.message);

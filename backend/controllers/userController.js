@@ -1,8 +1,8 @@
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 
-import Server from '../models/serverModel.js';
-import User from '../models/userModel.js';
+import Server from "../models/serverModel.js";
+import User from "../models/userModel.js";
 
 export const register = async (req, res) => {
   try {
@@ -72,16 +72,16 @@ export const login = async (req, res) => {
     };
     const jwtToken = jwt.sign(payload, process.env.JWT_SECRET);
     // login controller
+
     res
       .status(200)
       .cookie("discordToken", jwtToken, {
-        // httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // 1 day
-        // secure: true, // localhost false
-        // sameSite: "none",
-        // path: "/",
+        httpOnly: true,
+        secure: true, // ✅ required for HTTPS
+        sameSite: "None", // ✅ required for cross-origin cookies
+        maxAge: 24 * 60 * 60 * 1000,
       })
-      .json({ message: "Login successful" }); // token is now in cookie, body optional
+      .json({ message: "Login successful" });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

@@ -348,6 +348,7 @@ const ServerDetails = ({
             <div className="flex items-center">
               <GoDotFill className="mr-1 text-green-500" />
               <span>{onlineUsers}</span>
+              <pre>{onlineUsers}</pre>
               <p>Online</p>
             </div>
 

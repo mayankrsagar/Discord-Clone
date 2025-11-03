@@ -22,7 +22,10 @@ const server = http.createServer(app);
 // ✅ Middleware
 app.use(
   cors({
-    origin: "http://localhost:5173", // 👈 your frontend origin
+    origin: [
+      "http://localhost:5173",
+      "https://discord-clone-red-delta.vercel.app",
+    ], // 👈 your frontend origin
     credentials: true,
   })
 );
@@ -45,7 +48,10 @@ server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 // ✅ Socket.IO setup
 const io = new SocketIO(server, {
   cors: {
-    origin: "http://localhost:5173", // 👈 match frontend
+    origin: [
+      "http://localhost:5173", // 👈 match frontend
+      "https://discord-clone-red-delta.vercel.app",
+    ],
     credentials: true,
   },
 });

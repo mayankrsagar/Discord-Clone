@@ -1,5 +1,6 @@
-import cloudinary from "cloudinary";
-import dotenv from "dotenv";
+// backend/utils/cloudinary.js
+import cloudinary from 'cloudinary';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -17,15 +18,36 @@ cloudinary.v2.config({
   secure: true,
 });
 
-export const handleUpload = (buffer) =>
+/**
+ * Streams a Buffer to Cloudinary.
+ * @param {Buffer} buffer
+ * @param {Object} options - upload options (folder, transformation, etc.)
+ * @returns {Promise<Object>} upload result (secure_url, public_id, ...)
+ */
+export const handleUpload = (buffer, options = {}) =>
   new Promise((resolve, reject) => {
-    cloudinary.v2.uploader
-      .upload_stream(
-        { resource_type: "auto", folder: "discord-servers" },
-        (err, result) => {
-          if (err) return reject(err);
-          resolve(result);
-        }
-      )
-      .end(buffer);
+    const uploadStream = cloudinary.v2.uploader.upload_stream(
+      options,
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+    uploadStream.end(buffer);
   });
+
+/**
+ * Deletes a Cloudinary asset by public_id.
+ * @param {String} publicId
+ * @returns {Promise<Object>}
+ */
+export const destroyImage = (publicId) =>
+  new Promise((resolve, reject) => {
+    if (!publicId) return resolve({ result: "not_found_or_empty_public_id" });
+    cloudinary.v2.uploader.destroy(publicId, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
+  });
+
+export default cloudinary;

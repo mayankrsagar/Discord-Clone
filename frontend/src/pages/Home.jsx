@@ -1,11 +1,18 @@
 /* eslint-disable react/prop-types */
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import Cookies from "js-cookie";
 import toast from "react-hot-toast";
 import { GoHomeFill } from "react-icons/go";
 import { HiUser } from "react-icons/hi2";
-import { IoClose, IoNotifications } from "react-icons/io5";
+import {
+  IoClose,
+  IoNotifications,
+} from "react-icons/io5";
 import { LuComputer } from "react-icons/lu";
 import { MdOutlineDone } from "react-icons/md";
 import { TbLogout } from "react-icons/tb";
@@ -14,6 +21,7 @@ import { io } from "socket.io-client";
 import useSWR from "swr";
 
 import Modal from "../components/Modal";
+import Profile from "../components/Profile";
 import host from "../host";
 import { axiosInstance as axios } from "../utils/axios";
 import Discover from "./Discover";
@@ -208,6 +216,7 @@ const Home = () => {
 
   return (
     <div className="relative flex min-h-dvh bg-slate-950">
+      <Profile user={user} />
       <Servers
         data={data}
         isLoading={isLoading}

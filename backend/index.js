@@ -1,18 +1,18 @@
-import cookieParser from "cookie-parser";
-import cors from "cors";
-import { config } from "dotenv";
-import express from "express";
-import http from "http";
-import { Server as SocketIO } from "socket.io";
+import cookieParser from 'cookie-parser';
+import cors from 'cors';
+import { config } from 'dotenv';
+import express from 'express';
+import http from 'http';
+import { Server as SocketIO } from 'socket.io';
 
 // DB connection
-import connectToDb from "./db/config.js";
-import channelRoutes from "./routes/channelRoutes.js";
-import invitationRoutes from "./routes/invitationRoutes.js";
-import messageRoutes from "./routes/messageRoutes.js";
-import serverRoutes from "./routes/serverRoutes.js";
+import connectToDb from './db/config.js';
+import channelRoutes from './routes/channelRoutes.js';
+import invitationRoutes from './routes/invitationRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import serverRoutes from './routes/serverRoutes.js';
 // Routes
-import userRoutes from "./routes/userRoutes.js";
+import userRoutes from './routes/userRoutes.js';
 
 config();
 const app = express();

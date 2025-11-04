@@ -24,210 +24,413 @@ import {
 } from "react-router-dom";
 import { io } from "socket.io-client";
 import useSWR from "swr";
-import { v4 } from "uuid";
 
 import host from "../host";
 import { axiosInstance as axios } from "../utils/axios";
 import Message from "./Message";
 
+const generateTempId = () =>
+  `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 const Channel = () => {
-  // eslint-disable-next-line no-unused-vars
-  const [file, setFile] = useState();
+  const [file, setFile] = useState(null);
+  const [filePreview, setFilePreview] = useState("");
   const [message, setMessage] = useState("");
   const [emojis, setEmojis] = useState(false);
   const [channel, setChannel] = useState({});
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
   const { id } = useParams();
-  const socket = useRef();
-  const token = Cookies.get("discordToken");
-  const { userId, username } = jwtDecode(token);
-
   const navigate = useNavigate();
+  const socket = useRef(null);
+  const listRef = useRef(null);
+  const dropRef = useRef(null);
 
-  useEffect(() => {
-    socket.current = io(host);
-    socket.current.emit("joinChannel", { channelId: id });
+  const token = Cookies.get("discordToken") ?? "";
+  let userId = "";
+  let username = "";
+  try {
+    const decoded = jwtDecode(token);
+    userId = decoded?.userId ?? "";
+    username = decoded?.username ?? "";
+  } catch {
+    // ignore, ProtectedRoutes should handle auth
+  }
 
-    //fetching channel details
-
-    const fetchChannel = async () => {
-      try {
-        const url = host + "/channel/" + id;
-        const res = await axios.get(url);
-        if (res.status === 200) {
-          setChannel(res.data?.channel);
-        }
-      } catch (error) {
-        toast.error(error.response.data.message, { duration: 1000 });
-      }
-    };
-
-    fetchChannel();
-  }, [id]);
-
-  const fetcher = async (url) => {
-    try {
-      const res = await axios.get(url);
-      if (res.status === 200) {
-        return res.data?.messages;
-      }
-    } catch (error) {
-      toast.error(error.response.data.message, { duration: 1000 });
-    }
-  };
-
-  // eslint-disable-next-line no-unused-vars
-  const { data, isLoading, error, mutate } = useSWR(
-    host + "/messages/" + id,
-    fetcher,
-    {
-      onError: (err) => toast.error(err.message),
-    },
-  );
-
-  const handleSendMessage = async () => {
-    try {
-      socket.current.emit("sendMessage", {
-        channelId: id,
-        message,
-        userId,
-        date: new Date(),
-        username,
-      });
-
-      const url = host + "/message";
-      const res = await axios.post(
-        url,
-        {
-          channelId: id,
-          message,
-          date: new Date(),
-        },
-        {
-          headers: {
-            Authorization: token,
-          },
-        },
-      );
-      if (res.status === 201) {
-        toast.success("Message sent", { duration: 1000 });
-        setMessage("");
-      }
-    } catch (error) {
-      toast.error(error.message, { duration: 1000 });
-    }
-  };
-
-  useEffect(() => {
-    if (socket.current) {
-      socket.current.off("message"); // Remove existing listeners
-      socket.current.on("message", (data) => {
-        mutate((messages) => [...messages, { ...data }], false);
-      });
-    }
-    return () => {
-      socket.current.off("message"); // Clean up to avoid duplicates
-    };
+  const fetcher = (url) => axios.get(url).then((res) => res.data?.messages);
+  const {
+    data: messages,
+    isLoading,
+    error,
+    mutate,
+  } = useSWR(id ? `${host}/messages/${id}` : null, fetcher, {
+    onError: (err) => toast.error(err?.message || "Failed to load messages"),
+    revalidateOnFocus: false,
   });
 
-  const handleEmoji = (e) => {
-    setMessage((prev) => prev + e.emoji);
+  // socket: attach once and avoid duplicate appends
+  useEffect(() => {
+    if (!id) return;
+    const sock = io(host);
+    socket.current = sock;
+    sock.emit("joinChannel", { channelId: id });
+
+    const onMessage = (msg) => {
+      // defensive: ignore if id already present
+      mutate((old = []) => {
+        if (!msg?._id) return [...old.filter(Boolean), msg];
+        if (old.some((m) => m._id === msg._id)) return old;
+        // if a temp existed which should be replaced, attempt replacement by matching a few fields
+        // Prefer exact replacement when POST returns created message (done in handleSendMessage).
+        return [...old, msg];
+      }, false);
+    };
+
+    const onEdited = (payload) =>
+      mutate(
+        (old = []) =>
+          old.map((m) => (m._id === payload._id ? { ...m, ...payload } : m)),
+        false,
+      );
+    const onDeleted = ({ _id }) =>
+      mutate((old = []) => old.filter((m) => m._id !== _id), false);
+
+    sock.on("message", onMessage);
+    sock.on("messageEdited", onEdited);
+    sock.on("messageDeleted", onDeleted);
+
+    // fetch channel details
+    axios
+      .get(`${host}/channel/${id}`)
+      .then((res) => setChannel(res.data?.channel ?? {}))
+      .catch((e) => {
+        toast.error(e?.response?.data?.message || "Channel error");
+      });
+
+    return () => {
+      sock.emit("leaveChannel", { channelId: id });
+      sock.off("message", onMessage);
+      sock.off("messageEdited", onEdited);
+      sock.off("messageDeleted", onDeleted);
+      sock.disconnect();
+      socket.current = null;
+    };
+  }, [id, mutate]);
+
+  // auto-scroll on messages change (simple behavior)
+  useEffect(() => {
+    if (!listRef.current) return;
+    const t = setTimeout(() => {
+      try {
+        const el = listRef.current;
+        el.scrollTop = el.scrollHeight;
+      } catch (e) {
+        console.log(e);
+      }
+    }, 80);
+    return () => clearTimeout(t);
+  }, [messages]);
+
+  // preview creation for selected file
+  useEffect(() => {
+    if (!file) {
+      setFilePreview("");
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setFilePreview(url);
+    return () => {
+      URL.revokeObjectURL(url);
+      setFilePreview("");
+    };
+  }, [file]);
+
+  // drag & drop handlers
+  useEffect(() => {
+    const el = dropRef.current;
+    if (!el) return;
+
+    const onDragOver = (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      el.classList.add("ring-2", "ring-offset-2", "ring-slate-600");
+    };
+    const onDragLeave = (e) => {
+      e.preventDefault();
+      el.classList.remove("ring-2", "ring-offset-2", "ring-slate-600");
+    };
+    const onDrop = (e) => {
+      e.preventDefault();
+      el.classList.remove("ring-2", "ring-offset-2", "ring-slate-600");
+      const f = e.dataTransfer.files?.[0] ?? null;
+      if (f) {
+        if (!f.type.startsWith("image/")) {
+          toast.error("Only images are allowed");
+          return;
+        }
+        setFile(f);
+      }
+    };
+
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("dragleave", onDragLeave);
+    el.addEventListener("drop", onDrop);
+
+    return () => {
+      el.removeEventListener("dragover", onDragOver);
+      el.removeEventListener("dragleave", onDragLeave);
+      el.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files?.[0] ?? null;
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      toast.error("Only images are allowed");
+      return;
+    }
+    setFile(f);
   };
 
+  const cancelFile = () => {
+    if (filePreview) URL.revokeObjectURL(filePreview);
+    setFile(null);
+    setFilePreview("");
+  };
+
+  const handleSendMessage = async () => {
+    const text = message.trim();
+    if (!text && !file) return;
+    if (!id) return;
+
+    const tempId = generateTempId();
+    const previewUrl = file ? filePreview || URL.createObjectURL(file) : null;
+
+    const tempMsg = {
+      _id: tempId,
+      __temp: true,
+      message: text,
+      userId,
+      username,
+      date: new Date().toISOString(),
+      imageUrl: previewUrl,
+      uploadProgress: file ? 0 : undefined,
+    };
+
+    // optimistic add
+    mutate((old = []) => [...old, tempMsg], false);
+    setMessage("");
+    const sentFile = file;
+    setFile(null);
+    setFilePreview("");
+
+    setIsUploading(Boolean(sentFile));
+    setUploadProgress(sentFile ? 0 : 100);
+
+    try {
+      const fd = new FormData();
+      fd.append("channelId", id);
+      fd.append("message", text);
+      fd.append("date", new Date().toISOString());
+      if (sentFile) fd.append("file", sentFile);
+
+      const res = await axios.post(`${host}/message`, fd, {
+        onUploadProgress: (evt) => {
+          if (!evt.lengthComputable) return;
+          const percent = Math.round((evt.loaded * 100) / evt.total);
+          setUploadProgress(percent);
+          // update optimistic message progress
+          mutate(
+            (old = []) =>
+              old.map((m) =>
+                m._id === tempId ? { ...m, uploadProgress: percent } : m,
+              ),
+            false,
+          );
+        },
+      });
+
+      const created = res?.data?.data;
+      if (created && created._id) {
+        // replace temp with actual created message
+        mutate((old = []) => {
+          // avoid duplicate: remove any existing item with created._id first
+          const withoutCreated = old.filter(
+            (m) => m._id !== created._id && m._id !== tempId,
+          );
+          return [...withoutCreated, created];
+        }, false);
+      } else {
+        // if server didn't return created message, mark temp as not-temp to avoid special treatment
+        mutate(
+          (old = []) =>
+            old.map((m) => (m._id === tempId ? { ...m, __temp: false } : m)),
+          false,
+        );
+      }
+    } catch (e) {
+      toast.error(
+        e?.response?.data?.message || e?.message || "Message not sent",
+      );
+      // rollback optimistic
+      mutate((old = []) => old.filter((m) => m._id !== tempId), false);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+      if (previewUrl && previewUrl.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(previewUrl);
+        } catch (e) {
+          console.log(e);
+        }
+      }
+    }
+  };
+
+  const handleEmoji = (e) => setMessage((prev) => prev + e.emoji);
+
   return (
-    <div className="relative flex min-h-dvh min-w-[300px] flex-col bg-slate-900">
+    <div className="relative flex min-h-dvh min-w-[300px] flex-col bg-slate-900 text-slate-100">
+      {/* header */}
       <div className="flex items-center gap-3 p-3">
         <FaArrowLeft
           onClick={() => navigate("/")}
-          className="text-xl text-slate-300"
+          className="cursor-pointer text-xl text-slate-300"
         />
-
         <div className="flex items-center gap-2">
           <FaHashtag className="text-xl text-slate-300" />
-          <p className="font-semibold text-slate-200">Name</p>
+          <p className="font-semibold">{channel.name ?? "Channel"}</p>
         </div>
       </div>
 
-      <div className="flex w-full max-w-[800px] flex-grow flex-col justify-end gap-2 self-center rounded-t-3xl bg-slate-800 p-4 pb-[80px] text-slate-100">
+      {/* messages area */}
+      <div className="flex w-full max-w-[800px] flex-grow flex-col justify-end self-center rounded-t-3xl bg-slate-800 p-4 pb-[140px]">
         <div className="flex w-full max-w-[600px] flex-col gap-2 self-center">
           <div className="w-fit rounded-full bg-slate-700 p-4 text-3xl">
             <FaHashtag />
           </div>
-
           <h1 className="text-3xl font-semibold">
-            Welcome to
-            <span className="first-letter:uppercase">
-              {" "}
-              {channel?.name}
-            </span>{" "}
-            server
+            Welcome to{" "}
+            <span className="first-letter:uppercase">{channel.name}</span>
           </h1>
-
-          <p className="text-sm font-semibold text-slate-300">
-            This is your brand new, shiny server.
+          <p className="text-sm text-slate-300">
+            This is your brand-new server.
           </p>
         </div>
 
-        <ul className="mt-4 flex w-full max-w-[600px] flex-col gap-4 self-center">
-          {data?.map((m) => {
-            return (
-              <Message mutate={mutate} key={v4()} userId={userId} data={m} />
-            );
-          })}
-        </ul>
+        {isLoading && <p className="self-center text-sm">Loading messages…</p>}
+        {error && (
+          <p className="self-center text-sm text-red-400">
+            Failed to load messages
+          </p>
+        )}
+
+        <div
+          ref={listRef}
+          className="mt-4 flex w-full max-w-[600px] flex-col gap-4 self-center overflow-y-auto"
+          style={{ maxHeight: "60vh" }}
+        >
+          <ul className="flex flex-col gap-4">
+            {(messages || []).map((m) => (
+              <Message key={m._id} mutate={mutate} userId={userId} data={m} />
+            ))}
+          </ul>
+        </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-50 m-auto flex max-w-[600px] items-center justify-center gap-2 bg-slate-800 p-3">
-        <label
-          htmlFor="file"
-          className="bg-discord rounded-full p-2 text-2xl text-white"
-        >
-          <IoAddOutline />
-        </label>
-
-        <input
-          onChange={(e) => setFile(e.target.files[0])}
-          id="file"
-          className="hidden"
-          type="file"
-        />
-        <div className="flex flex-grow items-center justify-center rounded-3xl bg-slate-900 px-2">
+      {/* input area (drag target) */}
+      <div
+        ref={dropRef}
+        className="fixed inset-x-0 bottom-0 z-40 m-auto flex max-w-[600px] items-end gap-2 bg-slate-800 p-3"
+      >
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="file"
+            className="bg-discord cursor-pointer rounded-full p-2 text-2xl text-white"
+          >
+            <IoAddOutline />
+          </label>
           <input
-            value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                handleSendMessage();
-              }
-            }}
-            className="h-[40px] w-[90%] bg-transparent pl-3 text-sm text-slate-200 outline-none"
+            id="file"
+            type="file"
+            className="hidden"
+            accept="image/*"
+            onChange={handleFileChange}
           />
+        </div>
 
-          <div className="relative flex h-[40px] w-[10%] items-center justify-center outline-none">
-            {emojis ? (
-              <IoCloseOutline
-                onClick={() => setEmojis(false)}
-                className="cursor-pointer text-2xl text-slate-200"
+        <div className="flex flex-grow flex-col gap-2">
+          {filePreview && (
+            <div className="flex items-center gap-2 rounded-md bg-slate-700 p-2">
+              <img
+                src={filePreview}
+                alt="preview"
+                className="h-16 w-24 rounded-md object-cover"
               />
-            ) : (
-              <BsFillEmojiSmileFill
-                onClick={() => setEmojis(true)}
-                className="cursor-pointer text-lg text-slate-200"
-              />
-            )}
+              <div className="flex-1 text-sm text-slate-200">
+                <div className="font-semibold">{file?.name}</div>
+                <div className="text-xs text-slate-400">
+                  {file ? `${Math.round(file.size / 1024)} KB` : ""}
+                </div>
+                {isUploading && (
+                  <div className="mt-1 w-full rounded bg-slate-600">
+                    <div
+                      style={{ width: `${uploadProgress}%` }}
+                      className="h-1 rounded bg-green-400"
+                    />
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={cancelFile}
+                aria-label="Cancel image"
+                className="p-2 text-slate-200"
+              >
+                <IoCloseOutline />
+              </button>
+            </div>
+          )}
 
-            <div className="absolute right-0 bottom-[60px] z-50">
-              <EmojiPicker
-                autoFocusSearch={false}
-                open={emojis}
-                theme="dark"
-                emojiStyle="google"
-                width={300}
-                height={350}
-                onEmojiClick={handleEmoji}
-                suggestedEmojisMode="recent"
-              />
+          <div className="flex items-center rounded-3xl bg-slate-900 px-2">
+            <input
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              placeholder="Message"
+              className="h-[40px] w-[90%] bg-transparent pl-3 text-sm text-slate-200 outline-none"
+            />
+            <div className="relative flex h-[40px] w-[10%] items-center justify-center">
+              {emojis ? (
+                <IoCloseOutline
+                  onClick={() => setEmojis(false)}
+                  className="cursor-pointer text-2xl text-slate-200"
+                />
+              ) : (
+                <BsFillEmojiSmileFill
+                  onClick={() => setEmojis(true)}
+                  className="cursor-pointer text-lg text-slate-200"
+                />
+              )}
+              {emojis && (
+                <div className="absolute right-0 bottom-[60px] z-50">
+                  <EmojiPicker
+                    theme="dark"
+                    emojiStyle="google"
+                    width={300}
+                    height={350}
+                    onEmojiClick={handleEmoji}
+                    autoFocusSearch={false}
+                    suggestedEmojisMode="recent"
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

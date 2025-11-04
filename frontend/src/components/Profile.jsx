@@ -8,7 +8,6 @@ import React, {
 import toast from "react-hot-toast";
 import {
   IoCamera,
-  IoClose,
   IoPencil,
 } from "react-icons/io5";
 import useSWR from "swr";
@@ -25,7 +24,7 @@ const fetchProfile = async (url) => {
   throw new Error("Failed to fetch profile");
 };
 
-export default function Profile() {
+export default function Profile(setProfileModal) {
   const {
     data: user,
     isLoading,
@@ -202,14 +201,14 @@ export default function Profile() {
           <div className="w-full max-w-[520px]">
             <div className="flex items-start justify-between">
               <h2 className="text-2xl font-semibold text-white">Profile</h2>
-              <button
+              {/* <button
                 onClick={() => {
                   setOpen(false);
                   setEditing(false);
                 }}
               >
                 <IoClose className="text-xl text-slate-300" />
-              </button>
+              </button> */}
             </div>
 
             <div className="mt-6 flex gap-6">

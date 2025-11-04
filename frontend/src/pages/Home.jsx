@@ -8,7 +8,6 @@ import {
 import Cookies from "js-cookie";
 import toast from "react-hot-toast";
 import { GoHomeFill } from "react-icons/go";
-import { HiUser } from "react-icons/hi2";
 import {
   IoClose,
   IoNotifications,
@@ -35,6 +34,7 @@ const Home = () => {
   const [currentServer, setCurrentServer] = useState("discover");
   const [notificationModal, setNotificationModal] = useState(false);
 
+  // profile stored here — passed to Profile component and updated via onProfileUpdate
   const [user, setUser] = useState({});
   const navigate = useNavigate();
 
@@ -66,7 +66,6 @@ const Home = () => {
         return res.data.invitations;
       }
     } catch (error) {
-      // keep same toast behaviour
       const msg = error?.response?.data?.message || error?.message || "Failed";
       toast.error(msg, { duration: 1000 });
     }
@@ -216,7 +215,6 @@ const Home = () => {
 
   return (
     <div className="relative flex min-h-dvh bg-slate-950">
-      <Profile user={user} />
       <Servers
         data={data}
         isLoading={isLoading}
@@ -256,51 +254,49 @@ const Home = () => {
         </div>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 h-[80px] bg-slate-700 p-3">
-        <div className="m-auto flex max-w-[400px] items-center justify-between gap-2 px-3">
-          {user?.profileImage ? (
-            <img src={user?.profileImage} alt={user?.username} className="" />
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="bg-discord w-fit rounded-full p-2 text-xl text-white">
-                <HiUser />
-              </div>
-              <p className="font-semibold text-white">{user?.username}</p>
-            </div>
-          )}
-
-          <div className="flex flex-col items-center">
-            <GoHomeFill className="text-2xl text-slate-400" />
-            <p className="text-xs font-semibold text-slate-300">Home</p>
+      {/* Bottom bar */}
+      <div className="fixed inset-x-0 bottom-0 h-20 bg-slate-700 p-3">
+        <div className="mx-auto flex max-w-sm items-center justify-between gap-4 px-3">
+          {/* Profile compact button (Profile component handles its own modal) */}
+          <div className="flex items-center">
+            {/* <Profile user={user} onProfileUpdate={(u) => setUser(u)} /> */}
+            <Profile />
           </div>
 
+          {/* Home Button */}
+          <div className="flex cursor-pointer flex-col items-center text-slate-300 hover:text-white">
+            <GoHomeFill className="text-2xl" />
+            <p className="text-xs font-semibold">Home</p>
+          </div>
+
+          {/* Notifications */}
           <div
             onClick={() => setNotificationModal(true)}
-            className="relative flex cursor-pointer flex-col items-center"
+            role="button"
+            className="relative flex cursor-pointer flex-col items-center text-slate-300 hover:text-white"
           >
-            <IoNotifications className="text-2xl text-slate-400" />
-            <p className="text-xs font-semibold text-slate-300">
-              Notifications
-            </p>
+            <IoNotifications className="text-2xl" />
+            <p className="text-xs font-semibold">Notifications</p>
 
-            {/* badge */}
             {pendingCount > 0 && (
-              <div className="absolute -top-1 right-[-6px] flex h-5 min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
+              <div className="absolute -top-1 -right-1 flex h-5 min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
                 {pendingCount > 99 ? "99+" : pendingCount}
               </div>
             )}
           </div>
 
+          {/* Logout */}
           <div
             onClick={() => {
               Cookies.remove("discordToken");
               toast.success("Logout successful", { duration: 1000 });
               setTimeout(() => navigate("/login"), 1000);
             }}
-            className="flex flex-col items-center"
+            role="button"
+            className="flex cursor-pointer flex-col items-center text-slate-300 hover:text-white"
           >
-            <TbLogout className="text-2xl text-slate-400" />
-            <p className="text-xs font-semibold text-slate-300">Logout</p>
+            <TbLogout className="text-2xl" />
+            <p className="text-xs font-semibold">Logout</p>
           </div>
         </div>
       </div>

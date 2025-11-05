@@ -219,3 +219,27 @@ export const fetchInviteUsers = async (req, res) => {
     res.status(500).json({ message: error.message || "Server error" });
   }
 };
+
+// ---- Get user by id (public) ----
+// GET /user/:id
+export const getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: "User id required" });
+
+    // Find user by id, return lean object
+    const user = await User.findById(id).lean();
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Remove sensitive fields
+    if (user.password) delete user.password;
+    if (user.profileImagePublicId) delete user.profileImagePublicId;
+
+    // Normalize avatar field name to `profileImage` (already used in updateProfile)
+    // Return user object
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error("getUserById error:", error);
+    res.status(500).json({ message: error.message || "Server error" });
+  }
+};

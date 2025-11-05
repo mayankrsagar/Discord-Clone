@@ -15,6 +15,7 @@ import {
 import { FiEdit2 } from "react-icons/fi";
 import { IoLogOutOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 
 import host from "../host";
 import { axiosInstance as axios } from "../utils/axios";
@@ -46,8 +47,6 @@ const Channels = ({ data = [] }) => {
 
   useEffect(() => {
     setChannels(data || []);
-    console.log("this is the data");
-    console.log(data);
   }, [data]);
   const userId = userProfile?._id;
 
@@ -145,6 +144,47 @@ const Channels = ({ data = [] }) => {
       toast.error(err?.response?.data?.message || "Failed to leave channel");
     }
   };
+
+  // NEW: subscribe to socket events so channels list updates in real-time
+  useEffect(() => {
+    const sock = io(host);
+
+    const onChannelDeleted = ({ _id }) => {
+      if (!_id) return;
+      setChannels((prev) => prev.filter((c) => String(c._id) !== String(_id)));
+      if (String(currentChannel) === String(_id)) {
+        setCurrentChannel("");
+        navigate("/");
+      }
+      // optional toast for live changes
+      toast.error("A channel was deleted");
+    };
+
+    const onChannelUpdated = (payload) => {
+      if (!payload || !payload._id) return;
+      setChannels((prev) =>
+        prev.map((ch) =>
+          String(ch._id) === String(payload._id)
+            ? {
+                ...ch,
+                name: payload.name ?? ch.name,
+                members: payload.members ?? ch.members,
+              }
+            : ch,
+        ),
+      );
+    };
+
+    sock.on("channelDeleted", onChannelDeleted);
+    sock.on("channelUpdated", onChannelUpdated);
+
+    return () => {
+      sock.off("channelDeleted", onChannelDeleted);
+      sock.off("channelUpdated", onChannelUpdated);
+      sock.disconnect();
+    };
+    // run once
+  }, [currentChannel, navigate]);
 
   return (
     <div className="m-2 flex flex-col p-2">

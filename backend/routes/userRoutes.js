@@ -1,7 +1,9 @@
+// backend/routes/userRoutes.js
 import { Router } from 'express';
 
 import {
   fetchInviteUsers,
+  getUserById,
   login,
   register,
   updateProfile,
@@ -14,8 +16,11 @@ const router = Router();
 
 router.post("/register", register);
 router.post("/login", login);
+router.put("/profile", authMiddleware, upload.single("file"), updateProfile);
 router.get("/profile", authMiddleware, userProfile);
 router.get("/invite/users/:serverId", authMiddleware, fetchInviteUsers);
-router.put("/profile", authMiddleware, upload.single("image"), updateProfile);
+
+// NEW: public user lookup by id
+router.get("/user/:id", authMiddleware, getUserById);
 
 export default router;

@@ -46,6 +46,9 @@ const Channel = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // NEW: loading state for channel fetch
+  const [channelLoading, setChannelLoading] = useState(false);
+
   const { id } = useParams();
   const navigate = useNavigate();
   const socket = useRef(null);
@@ -72,7 +75,32 @@ const Channel = () => {
     revalidateOnFocus: false,
   });
 
-  // socket: attach once and avoid duplicate appends
+  // fetch channel details only when id changes
+  useEffect(() => {
+    if (!id) {
+      setChannel({});
+      return;
+    }
+    let cancelled = false;
+    const fetchChannel = async () => {
+      setChannelLoading(true);
+      try {
+        const res = await axios.get(`${host}/channel/${id}`);
+        if (!cancelled) setChannel(res.data?.channel ?? {});
+      } catch (e) {
+        if (!cancelled)
+          toast.error(e?.response?.data?.message || "Channel error");
+      } finally {
+        if (!cancelled) setChannelLoading(false);
+      }
+    };
+    fetchChannel();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  // socket: attach once for the current channel id (recreate when id changes)
   useEffect(() => {
     if (!id) return;
     const sock = io(host);
@@ -138,17 +166,6 @@ const Channel = () => {
     sock.on("channelUpdated", onChannelUpdated);
     sock.on("channelDeleted", onChannelDeleted);
 
-    // fetch channel details
-    axios
-      .get(`${host}/channel/${id}`)
-      .then((res) => {
-        const ch = res.data?.channel ?? {};
-        setChannel(ch);
-      })
-      .catch((e) => {
-        toast.error(e?.response?.data?.message || "Channel error");
-      });
-
     return () => {
       sock.emit("leaveChannel", { channelId: id });
       sock.off("message", onMessage);
@@ -159,6 +176,7 @@ const Channel = () => {
       sock.disconnect();
       socket.current = null;
     };
+    // only recreate socket when id changes
   }, [id, mutate, navigate]);
 
   // auto-scroll on messages change (simple behavior)
@@ -186,8 +204,8 @@ const Channel = () => {
       try {
         URL.revokeObjectURL(url);
       } catch (e) {
-        console.log(e);
         // ignore
+        console.log(e);
       }
       setFilePreview("");
     };
@@ -246,15 +264,17 @@ const Channel = () => {
       try {
         URL.revokeObjectURL(filePreview);
       } catch (e) {
-        console.log(e);
         // ignore
+        console.log(e);
       }
     }
     setFile(null);
     setFilePreview("");
   };
+
   let userId = user?._id;
   let username = user?.username;
+
   const handleSendMessage = async () => {
     const text = message.trim();
     if (!text && !file) return;
@@ -337,6 +357,7 @@ const Channel = () => {
         try {
           URL.revokeObjectURL(previewUrl);
         } catch (e) {
+          // ignore
           console.log(e);
         }
       }
@@ -382,7 +403,6 @@ const Channel = () => {
         return;
       }
       toast.success(res.data?.message || "You left the channel");
-      // when server emits channelUpdated, the channel.members will be updated via socket handler
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to leave channel");
     } finally {
@@ -390,13 +410,11 @@ const Channel = () => {
         if (socket.current)
           socket.current.emit("leaveChannel", { channelId: id });
       } catch (e) {
+        // ignore
         console.log(e);
       }
     }
   };
-
-  // const canDeleteChannel =
-  //   channel?.createdBy && String(channel.createdBy) === String(userId);
 
   return (
     <div className="relative flex min-h-dvh min-w-[300px] flex-col bg-slate-900 text-slate-100">
@@ -408,7 +426,17 @@ const Channel = () => {
         />
         <div className="flex items-center gap-2">
           <FaHashtag className="text-xl text-slate-300" />
-          <p className="font-semibold">{channel.name ?? "Channel"}</p>
+          <p className="font-semibold">
+            {channel.name ?? "Channel"}
+            {/* small loading indicator next to the name */}
+            {channelLoading && (
+              <span
+                className="ml-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
+                title="Loading channel..."
+              />
+            )}
+          </p>
+
           <span className="ml-2 rounded-md bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
             {Array.isArray(channel.members) ? channel.members.length : 0}{" "}
             members
@@ -476,7 +504,13 @@ const Channel = () => {
         >
           <ul className="flex flex-col gap-4">
             {(messages || []).map((m) => (
-              <Message key={m._id} mutate={mutate} userId={userId} data={m} />
+              <Message
+                key={m._id}
+                mutate={mutate}
+                userId={userId}
+                data={m}
+                user={user}
+              />
             ))}
           </ul>
         </div>

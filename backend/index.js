@@ -33,12 +33,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // CORS configuration - prefer env override
-const allowedOrigins = (
-  process.env.ALLOWED_ORIGINS ||
-  "http://localhost:5173,https://discord-clone-red-delta.vercel.app"
-)
-  .split(",")
-  .map((s) => s.trim());
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_DEPLOYED_URL,
+].filter(Boolean); // Removes undefined or empty entries
 
 app.use(
   cors({

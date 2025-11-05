@@ -104,7 +104,8 @@ export const updateProfile = async (req, res) => {
     const { username, bio } = req.body;
     const fileBuffer = req.file?.buffer || null;
     const userId = req.user?.userId;
-
+    console.log("inside the backend");
+    console.log(fileBuffer);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const user = await User.findById(userId);

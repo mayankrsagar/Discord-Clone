@@ -100,7 +100,8 @@ export default function Profile(setProfileModal) {
       form.append("username", username);
       form.append("bio", bio || "");
       if (file) form.append("image", file);
-
+      console.log("this is image");
+      console.log(file);
       const res = await axios.put(`${host}/profile`, form, {
         withCredentials: true, // ensure cookie is sent
         // DO NOT set Content-Type manually

@@ -16,7 +16,7 @@ const router = Router();
 
 router.post("/register", register);
 router.post("/login", login);
-router.put("/profile", authMiddleware, upload.single("file"), updateProfile);
+router.put("/profile", authMiddleware, upload.single("image"), updateProfile);
 router.get("/profile", authMiddleware, userProfile);
 router.get("/invite/users/:serverId", authMiddleware, fetchInviteUsers);
 

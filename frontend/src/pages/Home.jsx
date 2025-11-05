@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -82,18 +83,18 @@ const Home = () => {
   // track invites currently being processed (prevent duplicate clicks)
   const [inFlightIds, setInFlightIds] = useState([]);
 
-  // sync localInvites when invites (SWR) updates
+  // Sync localInvites when invites are fetched
   useEffect(() => {
-    setLocalInvites(invites || []);
+    if (Array.isArray(invites)) {
+      setLocalInvites(invites);
+    }
   }, [invites]);
 
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const url = host + "/profile";
-        const res = await axios.get(url, {
-          withCredentials: true,
-        });
+        const res = await axios.get(url, { withCredentials: true });
         if (res.status === 200) {
           setUser(res.data?.user || {});
         }
@@ -103,6 +104,7 @@ const Home = () => {
         toast.error(msg, { duration: 1000 });
       }
     };
+
     fetchUser();
   }, []);
 
@@ -211,7 +213,7 @@ const Home = () => {
   };
 
   // badge count
-  const pendingCount = (localInvites || []).length;
+  const pendingCount = useMemo(() => localInvites?.length || 0, [localInvites]);
 
   return (
     <div className="relative flex min-h-dvh bg-slate-950">
@@ -310,7 +312,13 @@ const Home = () => {
           {(localInvites || []).length > 0 ? (
             <ul className="mt-3 flex flex-col gap-5">
               {localInvites.map((i) => {
-                const { _id, name, image, receiverUserId, serverId } = i;
+                const {
+                  _id,
+                  serverName: name,
+                  serverImage: image,
+                  receiverUserId,
+                  serverId,
+                } = i;
                 const isInFlight = inFlightIds.includes(_id);
 
                 return (
@@ -320,7 +328,7 @@ const Home = () => {
                   >
                     {image ? (
                       <img
-                        alt={name}
+                        alt={name || "Server Image"}
                         src={image}
                         className="h-[50px] w-[50px] rounded-full"
                       />

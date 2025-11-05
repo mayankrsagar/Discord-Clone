@@ -3,7 +3,7 @@ import Message from '../models/messageModel.js';
 import {
   destroyImage,
   handleUpload,
-} from '../utils/cloudinary.js'; // import upload helper
+} from '../utils/cloudinary.js';
 
 export const AddMessage = async (req, res) => {
   try {
@@ -65,6 +65,18 @@ export const AddMessage = async (req, res) => {
 export const deleteMessage = async (req, res) => {
   try {
     const { id } = req.params;
+    const { userId } = req.user;
+
+    const found = await Message.findById(id);
+    if (!found) return res.status(404).json({ message: "Message not found" });
+
+    // Only author can delete (or allow server admins if you implement roles)
+    if (String(found.userId) !== String(userId)) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to delete this message" });
+    }
+
     const removed = await Message.findByIdAndDelete(id);
 
     // if removed had an image, delete from cloudinary
@@ -108,6 +120,17 @@ export const editMessage = async (req, res) => {
   try {
     const { id } = req.params;
     const { message, date } = req.body;
+    const { userId } = req.user;
+
+    const found = await Message.findById(id);
+    if (!found) return res.status(404).json({ message: "Message not found" });
+
+    if (String(found.userId) !== String(userId)) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to edit this message" });
+    }
+
     const updated = await Message.findByIdAndUpdate(
       id,
       { $set: { message, date } },

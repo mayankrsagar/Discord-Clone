@@ -1,3 +1,4 @@
+// src/components/Message.jsx
 /* eslint-disable react/prop-types */
 /* eslint-disable no-unused-vars */
 import React, { useState } from "react";
@@ -17,6 +18,9 @@ const Message = ({ data, userId, mutate }) => {
   const [edit, setEdit] = useState(false);
   const [editMessage, setEditMessage] = useState(message ?? "");
 
+  // is this optimistic temp message?
+  const isTemp = String(data._id || "").startsWith("temp-");
+
   // Initialize editMessage when user explicitly opens edit mode
   const toggleEdit = () => {
     if (!edit) {
@@ -30,6 +34,12 @@ const Message = ({ data, userId, mutate }) => {
   const isMine = String(userId) === String(data.userId);
 
   const handleEdit = async () => {
+    if (isTemp) {
+      toast.error("Can't edit until message is saved", { duration: 2000 });
+      setEdit(false);
+      return;
+    }
+
     const trimmed = (editMessage ?? "").trim();
     if (!trimmed || trimmed === (message ?? "").trim()) {
       setEdit(false);
@@ -53,6 +63,15 @@ const Message = ({ data, userId, mutate }) => {
   };
 
   const handleDelete = async () => {
+    if (isTemp) {
+      // simply remove optimistic message locally
+      if (mutate) {
+        mutate((old = []) => old.filter((m) => m._id !== data._id), false);
+      }
+      toast.success("Message removed", { duration: 1000 });
+      return;
+    }
+
     try {
       const res = await axios.delete(`${host}/message/${data._id}`);
       if (res.status === 200) {

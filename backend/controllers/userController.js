@@ -103,8 +103,6 @@ export const updateProfile = async (req, res) => {
   try {
     const { username, bio } = req.body;
     const fileBuffer = req.file?.buffer || null;
-    console.log("inside the update profile");
-    console.log(req.user);
     const userId = req.user?.userId;
 
     if (!userId) return res.status(401).json({ message: "Unauthorized" });

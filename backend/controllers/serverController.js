@@ -126,11 +126,7 @@ export const deleteServer = async (req, res) => {
 
     const server = await Server.findById(id);
     if (!server) return res.status(404).json({ message: "Server not found" });
-    console.log("this is inside the delete");
-    console.log("id:", id);
-    console.log("this is with req.user");
-    console.log(req.user);
-    console.log(req.user.userId);
+
     // Optional: enforce only owner can delete
     if (server.owner.toString() !== req.user.userId)
       return res.status(403).json({ message: "Only owner can delete server" });

@@ -1,3 +1,4 @@
+// src/components/Channel.jsx
 import {
   useEffect,
   useRef,
@@ -5,9 +6,8 @@ import {
 } from "react";
 
 import EmojiPicker from "emoji-picker-react";
-import Cookies from "js-cookie";
-import { jwtDecode } from "jwt-decode";
 import toast from "react-hot-toast";
+import { AiFillDelete } from "react-icons/ai";
 import { BsFillEmojiSmileFill } from "react-icons/bs";
 import {
   FaArrowLeft,
@@ -16,6 +16,7 @@ import {
 import {
   IoAddOutline,
   IoCloseOutline,
+  IoLogOutOutline,
   IoSend,
 } from "react-icons/io5";
 import {
@@ -40,6 +41,10 @@ const Channel = () => {
   const [channel, setChannel] = useState({});
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [user, setUser] = useState(null);
+  // new: local state for delete confirmation modal
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const { id } = useParams();
   const navigate = useNavigate();
@@ -47,16 +52,14 @@ const Channel = () => {
   const listRef = useRef(null);
   const dropRef = useRef(null);
 
-  const token = Cookies.get("discordToken") ?? "";
-  let userId = "";
-  let username = "";
-  try {
-    const decoded = jwtDecode(token);
-    userId = decoded?.userId ?? "";
-    username = decoded?.username ?? "";
-  } catch {
-    // ignore, ProtectedRoutes should handle auth
-  }
+  const fetchUser = async () => {
+    try {
+      const res = await axios.get(`${host}/profile`);
+      setUser(res.data.user);
+    } catch (error) {
+      console.log("Failed to fetch user profile:", error);
+    }
+  };
 
   const fetcher = (url) => axios.get(url).then((res) => res.data?.messages);
   const {
@@ -77,12 +80,17 @@ const Channel = () => {
     sock.emit("joinChannel", { channelId: id });
 
     const onMessage = (msg) => {
-      // defensive: ignore if id already present
       mutate((old = []) => {
-        if (!msg?._id) return [...old.filter(Boolean), msg];
+        if (!msg?._id) {
+          const transient = {
+            ...msg,
+            _id: `transient-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2, 6)}`,
+          };
+          return [...old.filter(Boolean), transient];
+        }
         if (old.some((m) => m._id === msg._id)) return old;
-        // if a temp existed which should be replaced, attempt replacement by matching a few fields
-        // Prefer exact replacement when POST returns created message (done in handleSendMessage).
         return [...old, msg];
       }, false);
     };
@@ -100,10 +108,43 @@ const Channel = () => {
     sock.on("messageEdited", onEdited);
     sock.on("messageDeleted", onDeleted);
 
+    // listen for channel metadata updates and deletions
+    const onChannelUpdated = (payload) => {
+      if (!payload) return;
+      if (payload._id && String(payload._id) !== String(id)) return;
+      // update members and name if provided
+      setChannel((prev) => ({
+        ...prev,
+        name: payload.name ?? prev.name,
+        members: payload.members ?? prev.members,
+      }));
+    };
+
+    const onChannelDeleted = ({ _id }) => {
+      if (!_id) return;
+      if (String(_id) !== String(id)) return;
+      toast.error("Channel was deleted");
+      // leave local room and navigate away
+      try {
+        if (socket.current)
+          socket.current.emit("leaveChannel", { channelId: id });
+      } catch (e) {
+        /* ignore */
+        console.log(e);
+      }
+      navigate("/");
+    };
+
+    sock.on("channelUpdated", onChannelUpdated);
+    sock.on("channelDeleted", onChannelDeleted);
+
     // fetch channel details
     axios
       .get(`${host}/channel/${id}`)
-      .then((res) => setChannel(res.data?.channel ?? {}))
+      .then((res) => {
+        const ch = res.data?.channel ?? {};
+        setChannel(ch);
+      })
       .catch((e) => {
         toast.error(e?.response?.data?.message || "Channel error");
       });
@@ -113,10 +154,12 @@ const Channel = () => {
       sock.off("message", onMessage);
       sock.off("messageEdited", onEdited);
       sock.off("messageDeleted", onDeleted);
+      sock.off("channelUpdated", onChannelUpdated);
+      sock.off("channelDeleted", onChannelDeleted);
       sock.disconnect();
       socket.current = null;
     };
-  }, [id, mutate]);
+  }, [id, mutate, navigate]);
 
   // auto-scroll on messages change (simple behavior)
   useEffect(() => {
@@ -132,7 +175,6 @@ const Channel = () => {
     return () => clearTimeout(t);
   }, [messages]);
 
-  // preview creation for selected file
   useEffect(() => {
     if (!file) {
       setFilePreview("");
@@ -141,7 +183,12 @@ const Channel = () => {
     const url = URL.createObjectURL(file);
     setFilePreview(url);
     return () => {
-      URL.revokeObjectURL(url);
+      try {
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.log(e);
+        // ignore
+      }
       setFilePreview("");
     };
   }, [file]);
@@ -176,7 +223,7 @@ const Channel = () => {
     el.addEventListener("dragover", onDragOver);
     el.addEventListener("dragleave", onDragLeave);
     el.addEventListener("drop", onDrop);
-
+    fetchUser();
     return () => {
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("dragleave", onDragLeave);
@@ -195,11 +242,19 @@ const Channel = () => {
   };
 
   const cancelFile = () => {
-    if (filePreview) URL.revokeObjectURL(filePreview);
+    if (filePreview) {
+      try {
+        URL.revokeObjectURL(filePreview);
+      } catch (e) {
+        console.log(e);
+        // ignore
+      }
+    }
     setFile(null);
     setFilePreview("");
   };
-
+  let userId = user?._id;
+  let username = user?.username;
   const handleSendMessage = async () => {
     const text = message.trim();
     if (!text && !file) return;
@@ -256,14 +311,13 @@ const Channel = () => {
       if (created && created._id) {
         // replace temp with actual created message
         mutate((old = []) => {
-          // avoid duplicate: remove any existing item with created._id first
           const withoutCreated = old.filter(
             (m) => m._id !== created._id && m._id !== tempId,
           );
           return [...withoutCreated, created];
         }, false);
       } else {
-        // if server didn't return created message, mark temp as not-temp to avoid special treatment
+        // if server didn't return created message, mark temp as not-temp
         mutate(
           (old = []) =>
             old.map((m) => (m._id === tempId ? { ...m, __temp: false } : m)),
@@ -291,6 +345,59 @@ const Channel = () => {
 
   const handleEmoji = (e) => setMessage((prev) => prev + e.emoji);
 
+  // Channel remove / leave handlers
+  const initiateDeleteChannel = () => {
+    setShowDeleteConfirm(true);
+  };
+  const doDeleteChannel = async () => {
+    if (!id) {
+      setShowDeleteConfirm(false);
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      const res = await axios.delete(`${host}/channel/${id}`);
+      toast.success(res.data?.message || "Channel deleted");
+      setShowDeleteConfirm(false);
+      navigate("/");
+    } catch (e) {
+      toast.error(e?.response?.data?.message || e?.message || "Delete failed");
+      setShowDeleteConfirm(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const isJoined = () => {
+    const members = channel?.members ?? [];
+    return members.some((m) => String(m) === String(userId));
+  };
+
+  const handleLeaveChannel = async () => {
+    try {
+      const res = await axios.post(`${host}/channel/${id}/leave`);
+      if (res.data?.channelDeleted) {
+        toast.success("You left. Channel deleted (last member).");
+        navigate("/");
+        return;
+      }
+      toast.success(res.data?.message || "You left the channel");
+      // when server emits channelUpdated, the channel.members will be updated via socket handler
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to leave channel");
+    } finally {
+      try {
+        if (socket.current)
+          socket.current.emit("leaveChannel", { channelId: id });
+      } catch (e) {
+        console.log(e);
+      }
+    }
+  };
+
+  // const canDeleteChannel =
+  //   channel?.createdBy && String(channel.createdBy) === String(userId);
+
   return (
     <div className="relative flex min-h-dvh min-w-[300px] flex-col bg-slate-900 text-slate-100">
       {/* header */}
@@ -302,6 +409,41 @@ const Channel = () => {
         <div className="flex items-center gap-2">
           <FaHashtag className="text-xl text-slate-300" />
           <p className="font-semibold">{channel.name ?? "Channel"}</p>
+          <span className="ml-2 rounded-md bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
+            {Array.isArray(channel.members) ? channel.members.length : 0}{" "}
+            members
+          </span>
+
+          {isJoined() ? (
+            <span className="ml-2 rounded-md bg-green-500 px-2 py-0.5 text-xs text-black">
+              Joined
+            </span>
+          ) : (
+            <span className="ml-2 rounded-md bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
+              Not Joined
+            </span>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleLeaveChannel}
+            title="Leave channel"
+            className="rounded p-2 hover:bg-slate-700"
+          >
+            <IoLogOutOutline />
+          </button>
+
+          {channel?.createdBy &&
+            String(channel.createdBy) === String(userId) && (
+              <button
+                onClick={initiateDeleteChannel}
+                title="Delete channel"
+                className="rounded p-2 text-red-400 hover:bg-red-600"
+              >
+                <AiFillDelete />
+              </button>
+            )}
         </div>
       </div>
 
@@ -442,6 +584,35 @@ const Channel = () => {
           <IoSend />
         </button>
       </div>
+
+      {/* Simple confirmation modal — minimal, accessible, and styled with Tailwind */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-slate-800 p-6 text-slate-100 shadow-lg">
+            <h3 className="mb-2 text-lg font-semibold">Delete channel</h3>
+            <p className="mb-4 text-sm text-slate-300">
+              Are you sure you want to delete this channel? This action cannot
+              be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="rounded-md bg-slate-700 px-4 py-2 text-sm hover:bg-slate-600"
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doDeleteChannel}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium hover:bg-red-500"
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

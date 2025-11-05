@@ -1,82 +1,100 @@
 /* eslint-disable react/prop-types */
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-import axios from "axios";
-// import Loader from "../components/Loader";
 import { debounce } from "lodash";
 import toast from "react-hot-toast";
 import { HiUser } from "react-icons/hi2";
 
 import host from "../host";
+import { axiosInstance as axios } from "../utils/axios";
 
-const InviteFriends = ({ serverId, query, inviterUserId, close }) => {
+const InviteFriends = ({ serverId, query = "", close }) => {
   const [friends, setFriends] = useState([]);
 
-  // Wrap the fetchFriends function with debounce
-  const fetchFriends = useCallback(
-    debounce(async (searchQuery) => {
+  // Memoized debounced fetch function
+  const debouncedFetch = useMemo(() => {
+    return debounce(async (searchQuery) => {
       try {
-        const url = host + "/invite/users/" + serverId + "?name=" + searchQuery;
+        const url = `${host}/invite/users/${serverId}?name=${encodeURIComponent(searchQuery)}`;
         const res = await axios.get(url);
-        if (res.status === 200) {
-          setFriends(res.data.users);
-        }
+        setFriends(res.data?.users ?? []);
       } catch (error) {
-        toast.error(error.response.data.message, { duration: 1000 });
+        const msg =
+          error?.response?.data?.message ??
+          error?.message ??
+          "Failed to fetch users";
+        toast.error(msg, { duration: 2000 });
+        setFriends([]);
       }
-    }, 500),
-    [serverId],
+    }, 500);
+  }, [serverId]);
+
+  // Callback wrapper to handle empty query safely
+  const fetchFriends = useCallback(
+    (searchQuery) => {
+      if (!searchQuery.trim()) {
+        setFriends([]); // Safe here, outside useEffect
+        return;
+      }
+      debouncedFetch(searchQuery);
+    },
+    [debouncedFetch],
   );
 
+  // Effect to trigger fetch on query change
   useEffect(() => {
-    if (query) {
+    const timer = setTimeout(() => {
       fetchFriends(query);
-    }
-    // Cleanup: cancel pending debounced calls if `query` changes or component unmounts
-    return () => {
-      fetchFriends.cancel();
-    };
-  }, [query]);
+    }, 0);
 
-  const handleInvite = async (id) => {
+    return () => {
+      clearTimeout(timer);
+      debouncedFetch.cancel();
+    };
+  }, [query, fetchFriends, debouncedFetch]);
+
+  // Invite handler
+  const handleInvite = async (receiverUserId) => {
     try {
-      const url = host + "/invite";
-      const res = await axios.post(url, {
-        inviterUserId,
-        receiverUserId: id,
+      const res = await axios.post(`${host}/invite`, {
+        receiverUserId,
         serverId,
       });
-      if (res.status === 201) {
-        toast.success(res.data.message, { duration: 1000 });
-        close();
-      }
+      toast.success(res.data?.message ?? "Invitation sent", { duration: 1500 });
+      if (typeof close === "function") close();
     } catch (error) {
-      toast.error(error.response.data.message, { duration: 1000 });
+      const msg =
+        error?.response?.data?.message ?? error?.message ?? "Invite failed";
+      toast.error(msg, { duration: 2000 });
     }
   };
 
   return (
     <ul className="mt-3 list-none">
-      {friends?.map((f) => {
-        const { username, invite } = f;
-        return (
-          <li className="flex items-center gap-3" key={f._id}>
-            <div className="bg-discord mt-1 w-fit rounded-full p-3 text-2xl text-white">
-              <HiUser />
-            </div>
-            <p className="mr-auto text-xl text-white">{username}</p>
-
-            {invite && (
-              <button
-                onClick={() => handleInvite(f._id)}
-                className="bg-discord cursor-pointer rounded-lg p-2 text-sm font-medium text-white"
-              >
-                Invite
-              </button>
-            )}
-          </li>
-        );
-      })}
+      {friends.length === 0 && (
+        <li className="text-sm text-slate-400">No users found.</li>
+      )}
+      {friends.map(({ _id, username, invite }) => (
+        <li className="flex items-center gap-3 py-2" key={_id}>
+          <div className="bg-discord mt-1 w-fit rounded-full p-3 text-2xl text-white">
+            <HiUser />
+          </div>
+          <p className="mr-auto text-lg text-white">{username}</p>
+          {invite && (
+            <button
+              onClick={() => handleInvite(_id)}
+              className="bg-discord cursor-pointer rounded-lg p-2 text-sm font-medium text-white"
+            >
+              Invite
+            </button>
+          )}
+        </li>
+      ))}
     </ul>
   );
 };

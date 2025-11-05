@@ -1,4 +1,3 @@
-// server.js
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import { config } from 'dotenv';
@@ -120,6 +119,19 @@ io.on("connection", (socket) => {
 
   socket.on("leaveChannel", ({ channelId }) => {
     if (channelId) socket.leave(channelId);
+  });
+
+  // NEW: allow client to join a per-user room for targeted pushes
+  socket.on("joinUser", ({ userId }) => {
+    try {
+      if (!userId) return;
+      const room = `user:${String(userId)}`;
+      socket.join(room);
+      // optional: ack
+      // socket.emit("joinedUserRoom", { room });
+    } catch (err) {
+      console.warn("joinUser error", err);
+    }
   });
 
   socket.on("sendMessage", ({ channelId, message, userId, date, username }) => {

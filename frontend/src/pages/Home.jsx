@@ -109,34 +109,77 @@ const Home = () => {
   }, []);
 
   // Setup socket to listen for new invites for this user
+  // Setup socket to listen for new invites for this user
   useEffect(() => {
     // do not connect until we have a user id
     if (!user?._id) return;
 
     socket.current = io(host, {
       withCredentials: true,
-      transports: ["websocket"], // optional but helps avoid fallback issues
+      transports: ["websocket"],
+      reconnectionAttempts: 5,
     });
 
-    // listen for invites pushed by server. backend should emit 'inviteReceived' with invite object
-    socket.current.on("inviteReceived", (invite) => {
-      // prepend to local invites
+    const sock = socket.current;
+
+    // once connected join a user-specific room so server can target this user
+    const joinUserRoom = () => {
+      try {
+        sock.emit("joinUser", { userId: user._id });
+      } catch (e) {
+        // swallow
+        console.log(e);
+      }
+    };
+
+    sock.on("connect", () => {
+      joinUserRoom();
+    });
+
+    // also attempt to re-join on reconnect
+    sock.on("reconnect", () => {
+      joinUserRoom();
+    });
+
+    // invite received -> update local state AND revalidate invites SWR
+    const onInviteReceived = async (invite) => {
+      if (!invite) return;
+      // prepend invite locally
       setLocalInvites((prev) => [invite, ...(prev || [])]);
-      // notify user visually
-      toast.success(`New invite: ${invite.name}`, { duration: 3000 });
+      // show banner + toast
+      toast.success(`New invite: ${invite.serverName || invite.serverName}`, {
+        duration: 3000,
+      });
       setShowBanner(invite);
-      // brief banner
       setTimeout(() => setShowBanner(null), 3500);
+
+      // revalidate SWR cache for invites so other components can rely on it
+      try {
+        if (typeof invitesMutate === "function") await invitesMutate();
+      } catch (e) {
+        // ignore
+        console.log(e);
+      }
+    };
+
+    sock.on("inviteReceived", onInviteReceived);
+
+    // optional: if the server emits a generic user message or errors
+    sock.on("connect_error", (err) => {
+      console.warn("Socket connect_error:", err?.message || err);
     });
 
     return () => {
-      if (socket.current) {
-        socket.current.off("inviteReceived");
-        socket.current.disconnect();
+      if (sock) {
+        sock.off("inviteReceived", onInviteReceived);
+        sock.off("connect");
+        sock.off("reconnect");
+        sock.off("connect_error");
+        sock.disconnect();
         socket.current = null;
       }
     };
-  }, [user?._id]);
+  }, [user?._id, invitesMutate]);
 
   // optimistic accept (immediately updates UI; revalidates caches; reopens server)
   const handleAcceptInvite = async (id, receiverUserId, serverId) => {

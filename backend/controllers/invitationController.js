@@ -1,5 +1,38 @@
+// backend/controllers/invitationController.js
+import mongoose from 'mongoose';
+
 import Invitation from '../models/invitationModel.js';
 import Server from '../models/serverModel.js';
+import User from '../models/userModel.js';
+
+/**
+ * Helper to emit to a user's room (if io exists)
+ * Room name: user:<userId>
+ */
+const emitToUser = (userId, event, payload) => {
+  try {
+    if (global.io && userId) {
+      const room = `user:${String(userId)}`;
+      global.io.to(room).emit(event, payload);
+    }
+  } catch (err) {
+    console.warn(`Failed to emit ${event} to user:${userId}`, err);
+  }
+};
+
+/**
+ * Helper to emit server updates to server room (if io exists)
+ * Room name: <serverId> (keeps parity with your existing onlineUsers room usage)
+ */
+const emitServerUpdated = (serverId, payload) => {
+  try {
+    if (global.io && serverId) {
+      global.io.to(String(serverId)).emit("serverUpdated", payload);
+    }
+  } catch (err) {
+    console.warn(`Failed to emit serverUpdated to server:${serverId}`, err);
+  }
+};
 
 export const addInvitation = async (req, res) => {
   try {
@@ -38,6 +71,17 @@ export const addInvitation = async (req, res) => {
       date: new Date(),
     });
 
+    // populate server details for payload
+    const payloadInvite = {
+      ...created._doc,
+      serverName: server?.name ?? null,
+      serverImage: server?.image ?? null,
+    };
+
+    // Emit the invite to the receiver's user room for live notification
+    // Room name used on client: `user:<userId>`
+    emitToUser(receiverUserId, "inviteReceived", payloadInvite);
+
     return res.status(201).json({ message: "Invitation sent", data: created });
   } catch (error) {
     console.error("addInvitation error:", error);
@@ -64,6 +108,10 @@ export const cancelInvitation = async (req, res) => {
     }
 
     await Invitation.findByIdAndDelete(id);
+
+    // emit to receiver that invite is removed (so their UI updates)
+    emitToUser(invitation.receiverUserId, "inviteRemoved", { _id: id });
+
     return res.status(200).json({ message: "Invitation cancelled" });
   } catch (error) {
     console.error("cancelInvitation error:", error);
@@ -93,12 +141,24 @@ export const acceptInvitation = async (req, res) => {
     if (!server) return res.status(404).json({ message: "Server not found" });
 
     // add if not present using $addToSet
-    await Server.findByIdAndUpdate(serverId, {
-      $addToSet: { members: { userId: receiverUserId } },
-    });
+    const updatedServer = await Server.findByIdAndUpdate(
+      serverId,
+      { $addToSet: { members: { userId: receiverUserId } } },
+      { new: true }
+    ).lean();
 
     // remove invitation
     await Invitation.findByIdAndDelete(id);
+
+    // emit to receiver that invite is removed
+    emitToUser(receiverUserId, "inviteRemoved", { _id: id });
+
+    // emit serverUpdated to the server room so clients can refresh member lists
+    emitServerUpdated(serverId, {
+      _id: updatedServer._id,
+      name: updatedServer.name,
+      members: updatedServer.members,
+    });
 
     return res.status(200).json({ message: "Invitation accepted" });
   } catch (error) {

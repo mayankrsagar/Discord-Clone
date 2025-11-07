@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import PropTypes from "prop-types";
 import toast from "react-hot-toast";
 import { FaArrowLeft } from "react-icons/fa6";
 import { IoAddOutline, IoClose, IoCloseCircle } from "react-icons/io5";
@@ -70,9 +71,21 @@ const AddServerModal = ({ isOpen, onClose, mutate }) => {
     trigger({ name: serverName.trim(), image: file });
   };
 
-  const handleJoinServer = () => {
+  const handleJoinServer = async (e) => {
+    e.preventDefault();
+
     if (!inviteLink.trim()) return setErrorMsg("Enter an invite link");
-    toast.success("Join flow coming soon!");
+    try {
+      const res = await axios.post(`/server/invite`, {
+        inviteCode: inviteLink.trim(),
+      });
+      onClose();
+      mutate(); // refresh list
+      toast.success(res.data.message);
+    } catch (error) {
+      setErrorMsg(error.response?.data?.message || "Server error");
+      return;
+    }
   };
 
   /* ---------- render ---------- */
@@ -242,6 +255,12 @@ const AddServerModal = ({ isOpen, onClose, mutate }) => {
       )}
     </div>
   );
+};
+
+AddServerModal.propTypes = {
+  isOpen: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  mutate: PropTypes.func.isRequired,
 };
 
 export default AddServerModal;

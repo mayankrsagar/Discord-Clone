@@ -1,10 +1,7 @@
-import Channel from '../models/channelModel.js';
-import Message from '../models/messageModel.js';
-import Server from '../models/serverModel.js';
-import {
-  destroyImage,
-  handleUpload,
-} from '../utils/cloudinary.js';
+import Channel from "../models/channelModel.js";
+import Message from "../models/messageModel.js";
+import Server from "../models/serverModel.js";
+import { destroyImage, handleUpload } from "../utils/cloudinary.js";
 
 /* POST /server */
 export const createServer = async (req, res) => {
@@ -194,6 +191,49 @@ export const createInviteCode = async (req, res) => {
   } catch (error) {
     console.error("createInviteCode error:", error);
     res.status(500).json({ message: error.message });
+  }
+};
+
+export const matchInviteCode = async (req, res) => {
+  try {
+    const { inviteCode } = req.body;
+    const userId = req.user?.userId;
+
+    if (!inviteCode) {
+      return res.status(400).json({ message: "Invite code is required" });
+    }
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized: Missing user ID" });
+    }
+
+    const server = await Server.findOne({ inviteCode });
+    if (!server) {
+      return res.status(404).json({ message: "Server not found" });
+    }
+
+    // Prevent duplicate membership
+    const alreadyMember = server.members.some(
+      (member) => member.userId.toString() === userId
+    );
+    if (alreadyMember) {
+      return res
+        .status(409)
+        .json({ message: "Already a member of this server" });
+    }
+
+    // Add user to members
+    server.members.push({ userId, role: "member" });
+    await server.save();
+
+    // Remove invite code (optional: only if it's single-use)
+    server.inviteCode = undefined;
+    await server.save();
+
+    res.status(200).json({ server, message: "Joined server successfully" });
+  } catch (error) {
+    console.error("matchInviteCode error:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 

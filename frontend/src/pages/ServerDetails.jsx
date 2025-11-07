@@ -1,8 +1,6 @@
 /* eslint-disable react/prop-types */
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import Cookies from "js-cookie";
-import { jwtDecode } from "jwt-decode";
 import toast from "react-hot-toast";
 import { FaAngleRight, FaHashtag } from "react-icons/fa6";
 import { GoDotFill } from "react-icons/go";
@@ -27,6 +25,7 @@ import Loader from "../components/Loader";
 import Modal from "../components/Modal";
 import host from "../host";
 import { axiosInstance as axios } from "../utils/axios";
+import copyText from "../utils/copyText";
 import Channels from "./Channels";
 import Friends from "./InviteFriends";
 
@@ -42,25 +41,38 @@ const ServerDetails = ({
   const [serverName, setServerName] = useState("");
   const [friendName, setFriendName] = useState("");
   const [alertModal, setAlertModal] = useState(false);
-  const [friends, setFriends] = useState([]);
+  // const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(0);
   const [editModal, setEditModal] = useState(false);
-
+  const [user, setUser] = useState(null);
   // Edit modal states
   const [editName, setEditName] = useState("");
   const [editImageFile, setEditImageFile] = useState(null);
   const [editImagePreview, setEditImagePreview] = useState(null);
   const [editLoading, setEditLoading] = useState(false);
 
-  const token = Cookies.get("discordToken");
-  const { userId } = token ? jwtDecode(token) : { userId: null };
-  const socket = useRef();
+  // fix: userId should come from user._id (or fallback to user.userId)
+  const userId = user?._id ?? user?.userId ?? null;
+  const socket = useRef(null);
+
+  // fetch user (use withCredentials so cookie token is sent)
+  const fetchUser = async () => {
+    try {
+      const res = await axios.get(`${host}/profile`, { withCredentials: true });
+      if (res.status === 200) {
+        setUser(res.data.user);
+      }
+    } catch (error) {
+      const msg = error?.response?.data?.message || error.message || "Failed";
+      toast.error(msg, { duration: 1000 });
+    }
+  };
 
   // --- SWR for server (renamed to avoid collisions) ---
   const fetchServer = async (url) => {
     try {
-      const res = await axios.get(url);
+      const res = await axios.get(url, { withCredentials: true });
       if (res.status === 200) {
         return res.data.server;
       }
@@ -83,22 +95,30 @@ const ServerDetails = ({
   useEffect(() => {
     if (!currentServer || !userId) return;
 
-    // socket.current = io(host);
+    // create socket and join server room via 'userOnline' (your existing server logic)
     socket.current = io(host, {
       withCredentials: true,
       transports: ["websocket"], // optional but helps avoid fallback issues
     });
 
-    socket.current.emit("userOnline", { serverId: currentServer, userId });
+    const sock = socket.current;
+    const onOnlineUsersCount = (count) => setOnlineUsers(count);
 
-    socket.current.on("onlineUsersCount", (count) => {
-      setOnlineUsers(count);
-    });
+    sock.emit("userOnline", { serverId: currentServer, userId });
 
+    sock.on("onlineUsersCount", onOnlineUsersCount);
+
+    // cleanup
     return () => {
-      if (socket.current) {
-        socket.current.off("onlineUsersCount");
-        socket.current.disconnect();
+      if (sock) {
+        sock.off("onlineUsersCount", onOnlineUsersCount);
+        try {
+          sock.emit("serverDisconnect", { serverId: currentServer, userId });
+        } catch (e) {
+          // ignore
+          console.log(e);
+        }
+        sock.disconnect();
         socket.current = null;
       }
       setOnlineUsers(0);
@@ -131,15 +151,20 @@ const ServerDetails = ({
         try {
           URL.revokeObjectURL(editImagePreview);
         } catch (e) {
+          console.log(e);
           // ignore
         }
       }
     };
   }, [editImagePreview, editImageFile]);
 
+  useEffect(() => {
+    fetchUser();
+  }, []);
+
   const fetchChannels = async (url) => {
     try {
-      const res = await axios.get(url);
+      const res = await axios.get(url, { withCredentials: true });
       if (res.status === 200) {
         return res.data.channels;
       }
@@ -170,9 +195,7 @@ const ServerDetails = ({
           name: serverName,
         },
         {
-          headers: {
-            Authorization: token,
-          },
+          withCredentials: true,
         },
       );
 
@@ -206,9 +229,13 @@ const ServerDetails = ({
     try {
       const url = host + "/server/invite/" + currentServer;
 
-      const res = await axios.put(url, {
-        inviteCode,
-      });
+      const res = await axios.put(
+        url,
+        {
+          inviteCode,
+        },
+        { withCredentials: true },
+      );
 
       if (res.status === 200) {
         toast.success(res.data?.message, { duration: 1000 });
@@ -223,12 +250,10 @@ const ServerDetails = ({
   const handleDeleteServer = async () => {
     try {
       const url = host + "/server/" + currentServer;
-      const res = await axios.delete(url, {
-        headers: { Authorization: token },
-      });
+      const res = await axios.delete(url, { withCredentials: true });
       if (res.status === 200) {
         toast.success(res.data?.message, { duration: 1000 });
-        serversMutate();
+        if (typeof serversMutate === "function") await serversMutate();
         setAlertModal(false);
         setServerModal(false);
         setCurrentServer("discover");
@@ -273,9 +298,8 @@ const ServerDetails = ({
       if (editImageFile) form.append("image", editImageFile);
 
       const res = await axios.put(url, form, {
-        headers: {
-          Authorization: token,
-        },
+        withCredentials: true,
+        headers: { "Content-Type": "multipart/form-data" },
       });
 
       if (res.status === 200) {
@@ -283,7 +307,7 @@ const ServerDetails = ({
           duration: 1200,
         });
         serverMutate();
-        serversMutate();
+        if (typeof serversMutate === "function") serversMutate();
         setEditModal(false);
       } else {
         toast.error("Unexpected response from server");
@@ -499,7 +523,12 @@ const ServerDetails = ({
               <div className="w-fit rounded-full bg-slate-600 p-3 font-bold text-slate-300">
                 <RiLink className="text-3xl" />
               </div>
-              <p className="text-xs font-semibold text-slate-400">Copy Link</p>
+              <p
+                className="text-xs font-semibold text-slate-400"
+                onClick={() => copyText()}
+              >
+                Copy Link
+              </p>
             </li>
 
             <li className="flex flex-col items-center gap-2">

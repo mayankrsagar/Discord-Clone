@@ -1,7 +1,6 @@
 /* eslint-disable react/prop-types */
-import React, { useState } from "react";
+import { useState } from "react";
 
-import Cookies from "js-cookie";
 import toast from "react-hot-toast";
 import { IoExit } from "react-icons/io5";
 
@@ -10,18 +9,16 @@ import { axiosInstance as axios } from "../utils/axios";
 import Modal from "./Modal";
 
 /**
- * LeaveServer (optimistic) — enhanced:
- * - If `serverMembersCount <= 1` it will DELETE the server first (DELETE /server/:id)
- *   then perform optimistic UI update & revalidation.
+ * LeaveServer (improved)
  *
  * Props:
  * - serverId (string) REQUIRED
  * - serverName (string) optional
- * - serverMembersCount (number) optional — number of members currently in server
- * - mutateServers (function) REQUIRED - your SWR mutate for server list, e.g. mutate from useSWR(host + '/server')
+ * - serverMembersCount (number) optional
+ * - mutateServers (function) REQUIRED - SWR mutate for server list
  * - setCurrentServer (function) optional - to set current server (we'll call it with "discover")
- * - apiPath (string) optional - custom leave API path; default: `${host}/server/leave/${serverId}`
- * - deletePath (string) optional - custom delete server path; default: `${host}/server/${serverId}`
+ * - apiPath (string) optional - custom leave API path
+ * - deletePath (string) optional - custom delete server path
  * - method (string) optional - HTTP method for leave: 'post'|'delete'|'put' (default: 'post')
  * - onLeft(response) optional - callback after successful leave/delete
  * - children/className for customization
@@ -42,54 +39,51 @@ export default function LeaveServer({
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const leaveEndpoint = apiPath || `${host}/server/leave/${serverId}`;
+  const deleteEndpoint = deletePath || `${host}/server/${serverId}`;
+
   if (!serverId) {
     console.warn("LeaveServer: serverId is required");
   }
-
-  const leaveEndpoint = apiPath || `${host}/server/leave/${serverId}`;
-  const deleteEndpoint = deletePath || `${host}/server/${serverId}`;
-  const token = Cookies.get("discordToken");
+  if (!mutateServers) {
+    console.warn(
+      "LeaveServer: mutateServers is recommended for optimistic updates",
+    );
+  }
 
   const callApi = async () => {
-    if (!mutateServers) {
-      console.warn(
-        "LeaveServer: mutateServers is not provided, optimistic update won't work.",
-      );
-    }
+    if (!serverId) return;
+    if (loading) return;
 
     setLoading(true);
 
-    // Snapshot and optimistic update using SWR mutate (functional form)
-    let snapshot;
-    try {
-      if (typeof mutateServers === "function") {
-        // optimistic remove server from list
-        snapshot = await mutateServers(
+    // optimistic update: remove the server locally if mutateServers is provided
+    if (typeof mutateServers === "function") {
+      try {
+        mutateServers(
           (current = []) =>
             (current || []).filter((s) => String(s._id) !== String(serverId)),
-          { rollbackOnError: true, revalidate: false },
+          { revalidate: false },
         );
-        // NOTE: snapshot holds the previous (returned) value only when mutate returns it;
-        // depending on SWR version, mutate may return previous value or new value — we rely on
-        // revalidate fallback below to restore if needed.
+      } catch (e) {
+        console.log(e);
+        // Non-fatal, we'll revalidate later
+        console.warn("optimistic mutate failed", e);
       }
-    } catch (e) {
-      // ignore optimistic mutate errors; we'll still call API and revalidate later
     }
 
-    // Immediately show discover view
+    // switch to discover view immediately (if provided)
     try {
       setCurrentServer?.("discover");
     } catch (e) {
+      console.log(e);
       // ignore
     }
 
     try {
       // If serverMembersCount is known and <= 1, delete the server instead of leaving
       if (typeof serverMembersCount === "number" && serverMembersCount <= 1) {
-        // delete server
         const resDelete = await axios.delete(deleteEndpoint, {
-          headers: token ? { Authorization: token } : {},
           withCredentials: true,
         });
 
@@ -97,76 +91,100 @@ export default function LeaveServer({
           toast.success(resDelete.data?.message || `Server deleted`, {
             duration: 1500,
           });
-          // revalidate server list from network
-          try {
-            if (typeof mutateServers === "function") await mutateServers();
-          } catch (e) {}
+          // revalidate server list from network (restore canonical state)
+          if (typeof mutateServers === "function") {
+            try {
+              await mutateServers();
+            } catch (e) {
+              console.log(e);
+              console.warn("revalidate after delete failed", e);
+            }
+          }
           onLeft?.(resDelete);
           setModalOpen(false);
           setLoading(false);
           return;
         } else {
-          // unexpected response - revalidate (rollback)
+          // unexpected response
           toast.error(resDelete?.data?.message || "Failed to delete server");
-          try {
-            if (typeof mutateServers === "function") await mutateServers();
-          } catch (e) {}
+          if (typeof mutateServers === "function") {
+            try {
+              await mutateServers();
+            } catch (e) {
+              console.log(e);
+              console.warn(
+                "revalidate after unexpected delete response failed",
+                e,
+              );
+            }
+          }
           setLoading(false);
           return;
         }
       }
 
-      // Otherwise, perform leave action (default POST /server/leave/:id or provided apiPath)
+      // Otherwise, perform leave action
       let resLeave;
-      if (method.toLowerCase() === "delete") {
-        resLeave = await axios.delete(leaveEndpoint, {
-          headers: token ? { Authorization: token } : {},
-          withCredentials: true,
-        });
-      } else if (method.toLowerCase() === "put") {
+      const verb = (method || "post").toLowerCase();
+      if (verb === "delete") {
+        resLeave = await axios.delete(leaveEndpoint, { withCredentials: true });
+      } else if (verb === "put") {
         resLeave = await axios.put(
           leaveEndpoint,
           {},
-          {
-            headers: token ? { Authorization: token } : {},
-            withCredentials: true,
-          },
+          { withCredentials: true },
         );
       } else {
+        // default POST
         resLeave = await axios.post(
           leaveEndpoint,
           {},
-          {
-            headers: token ? { Authorization: token } : {},
-            withCredentials: true,
-          },
+          { withCredentials: true },
         );
       }
 
       if (resLeave?.status === 200) {
         toast.success(
           resLeave.data?.message || `Left ${serverName || "server"}`,
-          { duration: 1500 },
+          {
+            duration: 1500,
+          },
         );
         // revalidate server list
-        try {
-          if (typeof mutateServers === "function") await mutateServers();
-        } catch (e) {}
+        if (typeof mutateServers === "function") {
+          try {
+            await mutateServers();
+          } catch (e) {
+            console.log(e);
+            console.warn("revalidate after leave failed", e);
+          }
+        }
         onLeft?.(resLeave);
         setModalOpen(false);
       } else {
         toast.error(resLeave?.data?.message || "Failed to leave server");
-        try {
-          if (typeof mutateServers === "function") await mutateServers();
-        } catch (e) {}
+        // revalidate to rollback optimistic change
+        if (typeof mutateServers === "function") {
+          try {
+            await mutateServers();
+          } catch (e) {
+            console.log(e);
+            console.warn("revalidate after failed leave failed", e);
+          }
+        }
       }
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || "Failed";
       toast.error(msg);
-      // rollback / revalidate so the server reappears
-      try {
-        if (typeof mutateServers === "function") await mutateServers();
-      } catch (e) {}
+      // revalidate so server reappears (rollback optimistic)
+      if (typeof mutateServers === "function") {
+        try {
+          await mutateServers();
+        } catch (e) {
+          console.log(e);
+          console.warn("revalidate after error failed", e);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -189,7 +207,7 @@ export default function LeaveServer({
       </button>
 
       {modalOpen && (
-        <Modal onClose={() => setModalOpen(false)}>
+        <Modal onClose={() => !loading && setModalOpen(false)}>
           <h2 className="text-lg font-semibold text-white">
             {typeof serverMembersCount === "number" && serverMembersCount <= 1
               ? `This server has only you as a member`
@@ -227,7 +245,7 @@ export default function LeaveServer({
             </button>
 
             <button
-              onClick={() => setModalOpen(false)}
+              onClick={() => !loading && setModalOpen(false)}
               className="rounded bg-slate-700 px-4 py-2 text-white"
             >
               Cancel

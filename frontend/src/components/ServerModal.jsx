@@ -1,5 +1,4 @@
-import React from "react";
-
+import PropTypes from "prop-types";
 import { GoDotFill } from "react-icons/go";
 import { IoIosSettings } from "react-icons/io";
 import { IoCloseCircle, IoNotifications, IoPersonAdd } from "react-icons/io5";
@@ -139,3 +138,18 @@ export default function ServerModal({
     </Modal>
   );
 }
+
+ServerModal.propTypes = {
+  server: PropTypes.object,
+  userId: PropTypes.string,
+  onlineUsers: PropTypes.number,
+  inviteCode: PropTypes.string,
+  setInviteCode: PropTypes.func.isRequired,
+  onClose: PropTypes.func,
+  onOpenInvite: PropTypes.func,
+  onOpenCreateChannel: PropTypes.func,
+  onOpenEdit: PropTypes.func,
+  onDelete: PropTypes.func,
+  onSaveInviteCode: PropTypes.func,
+  onGenerateInvite: PropTypes.func,
+};

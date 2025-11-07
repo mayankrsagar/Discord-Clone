@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 
 import Friends from "../views/InviteFriends";
 import Modal from "./Modal";
@@ -18,3 +18,9 @@ export default function InviteModal({ onClose, serverId, inviterUserId }) {
     </Modal>
   );
 }
+
+InviteModal.propTypes = {
+  onClose: PropTypes.func.isRequired,
+  serverId: PropTypes.string.isRequired,
+  inviterUserId: PropTypes.string.isRequired,
+};

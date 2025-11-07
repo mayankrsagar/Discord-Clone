@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router } from "express";
 
 import {
   createInviteCode,
@@ -7,10 +7,11 @@ import {
   fetchServer,
   fetchServers,
   leaveServer,
+  matchInviteCode,
   updateServer,
-} from '../controllers/serverController.js';
-import authMiddleware from '../middlewares/authMiddleware.js';
-import upload from '../middlewares/multer.js';
+} from "../controllers/serverController.js";
+import authMiddleware from "../middlewares/authMiddleware.js";
+import upload from "../middlewares/multer.js";
 
 const router = Router();
 
@@ -21,4 +22,5 @@ router.put("/server/invite/:id", authMiddleware, createInviteCode);
 router.delete("/server/:id", authMiddleware, deleteServer);
 router.put("/server/:id", authMiddleware, upload.single("image"), updateServer);
 router.post("/server/leave/:id", authMiddleware, leaveServer);
+router.post("/server/invite", authMiddleware, matchInviteCode);
 export default router;
